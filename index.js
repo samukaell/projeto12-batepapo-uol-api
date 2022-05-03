@@ -3,6 +3,7 @@ import express,{json} from 'express';
 import cors from 'cors'
 import { MongoClient, ObjectId } from 'mongodb';
 import dotenv from 'dotenv';
+import joi from 'joi'
 
 
 const app = express();
@@ -46,36 +47,44 @@ app.get("/participants", (req,res)=>{
 
 app.post("/participants",async (req,res)=>{
     const {name} = req.body;
-    if(name == ""){
-        res.status(422).send("O nome não pode ser vazio");
-    }else{
-        try{
-            //Esta vazio?
-            const participanetes = await database.collection("participantes").findOne({});
-            if(participanetes==null){
-                const cadastrar = await database.collection("participantes").insertOne({name:name, lastStatus: Date.now()})
-                res.status(200).send("O nome foi cadastrado :3");
-            //Se nao esta vazio
-            }else{
-                //Procurando nome  
-                let user = await database.collection("participantes").findOne({name:name})
-                console.log("existe->",user);
 
-                if(user == null){
-                    await database.collection("participantes").insertOne({name:name, lastStatus: Date.now()})
-                    console.log("Cadastrou!");
-                    res.status(200).send("BORA!");
-                }else{
-                    console.log("Tem gente logada com esse nome");
-                    res.status(409).send("Puts, num deu!");
-                }
-            }
-        }catch(err){
-            console.log(chalk.bold.red("Erro ao tentar cadastrar o participante", err));
-            res.status(500).send("Ops, problema no cadastro do participanete :(");
-        }
-    }
+    const userSchema = joi.object({
+        name: joi.string().required()
+    });
+
+    const validation = userSchema.validate(req.body, { abortEarly: false });
+    console.log("Validação->",validation);
     
+    if (validation.error) {
+        console.log(validation.error.details)
+        res.status(422).send("O nome não pode ser vazio");
+    }
+
+    try{
+        //Esta vazio?
+        const participanetes = await database.collection("participantes").findOne({});
+        if(participanetes==null){
+            const cadastrar = await database.collection("participantes").insertOne({name:name, lastStatus: Date.now()})
+            res.status(200).send("O nome foi cadastrado :3");
+        //Se nao esta vazio
+        }else{
+            //Procurando nome  
+            let user = await database.collection("participantes").findOne({name:name})
+            console.log("existe->",user);
+
+            if(user == null){
+                await database.collection("participantes").insertOne({name:name, lastStatus: Date.now()})
+                console.log("Cadastrou!");
+                res.status(200).send("BORA!");
+            }else{
+                console.log("Tem gente logada com esse nome");
+                res.status(409).send("Puts, num deu!");
+            }
+        }
+    }catch(err){
+        console.log(chalk.bold.red("Erro ao tentar cadastrar o participante", err));
+        res.status(500).send("Ops, problema no cadastro do participanete :(");
+    }
 });
 
 //Mensagens
@@ -86,9 +95,9 @@ app.get("/messages", (req,res)=>{
     const promise = database.collection("mensagens").find({}).toArray();
     promise.then((mensagens) => {
         if(limit != undefined && limit != null){
-            res.send([...mensagens].reverse().slice(0,limit));
+            res.send([...mensagens].slice(0,limit));
         }else{
-            res.send([...mensagens].reverse());
+            res.send([...mensagens]);
         }
     });
     promise.catch(err=>{
@@ -101,34 +110,38 @@ app.post("/messages",async(req,res)=>{
     const {to,text,type} = req.body;
     const {user} = req.headers;
 
+    const userSchema = joi.object({
+        to: joi.string().required(),
+        text: joi.string().required(),
+        type: joi.string().required()
+    });
+
+    const validation = userSchema.validate(req.body, { abortEarly: false });
+    console.log("Validação->",validation);
+    if (validation.error) {
+        console.log(validation.error.details)
+    }
+
     try{
         let usuario = await database.collection("participantes").findOne({name:user});
-        console.log("O usuario",usuario," postou!");
 
         if(usuario != null){
-            if(to != "" && text != "" && (type == 'message' || type == 'private_message')){
-            
-                console.log("Para->",to,"Texto->",text,"tipo->",type,"Hoje->");
-        
-                let objetoMensagem = {
-                    from: user, to: to, text: text, type: type, time: date
-                }
-        
-                //Banco
-                const promise = database.collection("mensagens").insertOne(objetoMensagem);
-                promise.then((confirmacao)=>{
-                    console.log("BD confirmaçao ->",confirmacao);
-                    res.sendStatus(201);
-                });
-                promise.catch(err=>{
-                    console.log(chalk.red.bold("Deu ruim no post->",err));
-                    res.sendStatus(500);
-                })
-        
-                
-            }else{
-                res.status(422).send("O post esta zuado");
+
+            let objetoMensagem = {
+                from: user, to: to, text: text, type: type, time: date
             }
+    
+            //Banco
+            const promise = database.collection("mensagens").insertOne(objetoMensagem);
+            promise.then((confirmacao)=>{
+                console.log("BD confirmaçao ->",confirmacao);
+                res.sendStatus(201);
+            });
+            promise.catch(err=>{
+                console.log(chalk.red.bold("Deu ruim no post->",err));
+                res.sendStatus(500);
+            })
+
         }else{
             console.log(chalk.bold.red("Erro na atualização do participante", err));
             res.status(404).send("Participante não esta logado");
@@ -149,7 +162,7 @@ app.post("/status", async (req, res) =>{
     try{
         let usuario = await database.collection("participantes").findOne({name:user});
         if(usuario != null){
-            console.log("Ainda presente o usuario",usuario);
+            //console.log("Ainda presente o usuario",usuario.name);
             await database.collection("participantes").updateOne({ 
                 _id: usuario._id 
             }, { $set: {
@@ -171,13 +184,8 @@ app.post("/status", async (req, res) =>{
 async function desconectarUsuarios(){
     let time = Date.now();
     try{
-        const excluidos = await database.collection("participantes").deleteMany({lastStatus: {$lt:time - 10000}});
-        const participanetes = await database.collection("participantes").find({}).toArray();
-        
+        const excluidos = await database.collection("participantes").deleteMany({lastStatus: {$lt:time - 10000}});   
         console.log("Excluidos->", excluidos);
-        console.log("Date now atual ->",time);
-        console.log("Lista de participantes->", participanetes);
-
     }catch(err){
         console.log(chalk.bold.red("Erro na lista de participantes", err));
     }
